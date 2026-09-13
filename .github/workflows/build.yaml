@@ -1,23 +1,9 @@
-# Builds statically-linked binaries for udp-broadcast-relay-redux and
-# publishes them to a GitHub Release.
-#
-# Pattern (mirrors skyfenton/udp-broadcast-relay-builds):
-#   one job per target -> download musl.cc toolchain -> compile -> artifact,
-#   then a single release job attaches everything to the tag's release.
-#
-# Note: the README suggests `gcc -O3 -march=native ...` which is only valid
-# for the host machine; for portable cross builds we use -O3 -static only.
-# If the repo ever grows a Makefile, replace the compile step with `make`.
-
 name: build
 
 on:
   push:
     tags:
       - "v*"
-  # Uncomment to also build on every push to the default branch:
-  # push:
-  #   branches: [ master, main ]
   workflow_dispatch: {}   # manual runs: binaries available as run artifacts
 
 permissions:
@@ -29,36 +15,17 @@ env:
 jobs:
   build:
     name: ${{ matrix.id }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest          # was ubuntu-22.04 (retired label -> stuck queued)
     strategy:
       fail-fast: false
       matrix:
         include:
-          - id: linux-x64
-            toolchain: x86_64-linux-musl-cross
-          - id: linux-x86
-            toolchain: i686-linux-musl-cross
-          - id: linux-arm64          # UDM Pro, Pi 3/4/5 (64-bit), Debian arm64
+          - id: linux-arm64         # UniFi OS consoles (UDM/UDR/UDM Pro/SE/UNVR/CKG2+/UXG)
             toolchain: aarch64-linux-musl-cross
-          - id: linux-armhf          # Pi Zero/1/2/3/4 in 32-bit mode
-            toolchain: arm-linux-musleabihf-cross
-          - id: linux-mips           # big-endian routers
-            toolchain: mips-linux-musl-cross
-          - id: linux-mipsle         # little-endian routers
-            toolchain: mipsel-linux-musl-cross
-          - id: linux-mips64el       # Ubiquiti EdgeRouter / Cavium Octeon
-            toolchain: mips64el-linux-musl-cross
-          - id: linux-riscv64
-            toolchain: riscv64-linux-musl-cross
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-        # If this workflow lives in a separate builds-only repo (like
-        # skyfenton's), check out the project instead:
-        # with:
-        #   repository: udp-redux/udp-broadcast-relay-redux
-        #   ref: master
 
       - name: Download musl toolchain
         run: |
@@ -68,14 +35,12 @@ jobs:
             "https://musl.cc/${{ matrix.toolchain }}.tgz"
           tar -xzf "${{ matrix.toolchain }}.tgz"
           rm -f "${{ matrix.toolchain }}.tgz"
-          # If musl.cc is unreachable, there is a mirror at https://more.musl.cc
-          # (URL may include a GCC version segment, e.g. /8/<toolchain>.tgz).
 
       - name: Compile static binary
         run: |
           set -euo pipefail
           TARGET="${{ matrix.toolchain }}"
-          TARGET="${TARGET%-cross}"        # x86_64-linux-musl-cross -> x86_64-linux-musl
+          TARGET="${TARGET%-cross}"        # aarch64-linux-musl-cross -> aarch64-linux-musl
           CC="$TARGET/bin/$TARGET-gcc"
           "$CC" -O3 -Wall -static -s \
             -o "$PROGRAM-${{ matrix.id }}" main.c
@@ -91,7 +56,7 @@ jobs:
     name: Publish GitHub release
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Download binaries
         uses: actions/download-artifact@v4
