@@ -3,40 +3,46 @@ name: build
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
+  workflow_dispatch:        # manual runs -> rolling "latest" release
 
 permissions:
-  contents: write
+  contents: write           # allows the built-in token to create releases
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm     # free hosted ARM64 runner for public repos
+    runs-on: ubuntu-24.04-arm     # free hosted ARM64 runner (public repo)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build static binary
         run: |
           gcc -O3 -static -s main.c -o udp-broadcast-relay-redux-linux-arm64
-          file udp-broadcast-relay-redux-linux-arm64   # should say: ARM aarch64, statically linked
+          sha256sum udp-broadcast-relay-redux-linux-arm64 > checksums-sha256.txt
+          file udp-broadcast-relay-redux-linux-arm64
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
         with:
           name: linux-arm64
-          path: udp-broadcast-relay-redux-linux-arm64
+          path: |
+            udp-broadcast-relay-redux-linux-arm64
+            checksums-sha256.txt
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest        # packaging only, arch doesn't matter here
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux-arm64
-          path: dist
-
-      - run: cd dist && sha256sum * > checksums-sha256.txt
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}   # built-in token, no setup needed
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+            TITLE="udp-broadcast-relay-redux $TAG"
+          else
+            TAG="latest"
+            TITLE="Latest build (run #$GITHUB_RUN_NUMBER)"
+            # replace the previous rolling "latest" release
+            gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TITLE" \
+            --notes "Static arm64 (aarch64) build of $GITHUB_SHA. Verify with: sha256sum -c checksums-sha256.txt" \
+            udp-broadcast-relay-redux-linux-arm64 checksums-sha256.txt
